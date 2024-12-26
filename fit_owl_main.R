@@ -33,6 +33,7 @@ fit.owl = function(itr_formula, prop_formula, mean_formula = NULL,method, trt, o
     ## Error handling
     if (!inherits(itr_formula, "formula")) stop("itr_formula must be a formula object.")
     if (!inherits(prop_formula, "formula")) stop("prop_formula must be a formula object.")
+    if (!inherits(mean_formula, "formula") & !is.null(mean_formula)) stop("mean_formula must be a formula object.")
     if (!trt %in% names(dat)) stop("The treatment variable is not in the dataset.")
     if (!outcome %in% names(dat)) stop("The outcome variable is not in the dataset.")
     
@@ -40,10 +41,11 @@ fit.owl = function(itr_formula, prop_formula, mean_formula = NULL,method, trt, o
     ## Extract variables from formulas
     itr_vars <- all.vars(itr_formula)
     prop_vars <- all.vars(prop_formula)
+   
     
     missing_itr_vars <- setdiff(itr_vars, names(dat))
     missing_prop_vars <- setdiff(prop_vars, names(dat))
-  
+   
     if(length(missing_itr_vars) > 0){
        stop(paste("The following variables in itr_formula are missing from the dataset:", 
                paste(missing_itr_vars, collapse = ", ")))
@@ -52,7 +54,18 @@ fit.owl = function(itr_formula, prop_formula, mean_formula = NULL,method, trt, o
     if(length(missing_prop_vars) > 0){
        stop(paste("The following variables in prop_formula are missing from the dataset:", 
                paste(missing_prop_vars, collapse = ", ")))
+    }
+    
+    # dealing with the case that the mean formula is not null
+    if(!is.null(mean_formula)){
+      mean_vars <- all.vars(mean_formula)
+      
+      missing_mean_vars <- setdiff(mean_vars, names(dat))
+      if(length(missing_mean_vars) > 0){
+        stop(paste("The following variables in mean_formula are missing from the dataset:", 
+                   paste(missing_mean_vars, collapse = ", ")))
       }
+    }
   
     ## Data preparing
     names(dat)[names(dat) ==  trt] = "A"
