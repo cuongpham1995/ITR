@@ -1,0 +1,458 @@
+---
+title: "Report on ITR"
+author: "Cuong Pham"
+date: "2024-10-26"
+output:
+  word_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+
+```{r echo=FALSE}
+#load the library
+library(xtable)
+library(dplyr)
+library(lme4) #mixed model
+library(kableExtra)
+library(tidyr)
+library(ggplot2)
+library(gridExtra)
+#iv.dat2a = readRDS(file = "C:\\Users\\cpham\\Documents\\ITR-R61\\ITR R61\\clean_data.RDS")
+
+iv.dat2a = readRDS(file = "C:\\Users\\cpham\\Documents\\ITR-R61\\ITR R61\\clean_data_outcome_change.RDS")
+
+#source("C:\\Users\\cpham\\Documents\\ITR-R61\\ITR R61\\Miscellaneous functions temp 2.R") 
+source("C:\\Users\\cpham\\Documents\\ITR-R61\\ITR R61\\Miscellaneous functions.R")
+
+#colnames(iv.dat2a)
+colnames(iv.dat2a)[25] = "Time_since_first_Levo" 
+
+colnames(iv.dat2a)
+```
+
+
+## Construction of the instrumental variable
+
+We construct the instrumental variable using all the data set (n = 194). 
+
+```{r echo=FALSE}
+#remove the center with only one or two patients
+center = iv.dat2a %>% group_by(cno) %>% summarise(cno.pct = mean(A == 1), no.patients = n()) %>% filter(no.patients > 2)
+iv.dat2a = iv.dat2a %>% filter(cno %in% center$cno) 
+
+
+iv.dat2a_scaled <- iv.dat2a
+iv.dat2a_scaled[, c("updrs_1", "updrs_2", "updrs_3", "age.2nd", "time_from_diagnosis.2nd", "bmi", "levodopa_dose.2nd", "Time_since_first_Levo")] <- scale(iv.dat2a[, c("updrs_1", "updrs_2", "updrs_3", "age.2nd", "time_from_diagnosis.2nd", "bmi", "levodopa_dose.2nd", "Time_since_first_Levo")])
+#fitting the mixed model
+
+
+
+mixed.model = glmer(as.factor(A) ~ updrs_1 + updrs_2 + updrs_3 + 
+                    age.2nd + gender + time_from_diagnosis.2nd + bmi + nausea + dys + fluc + ortho + sleep +
+                      levodopa_dose.2nd + Time_since_first_Levo +(1|cno), data = iv.dat2a_scaled, family = binomial, control = glmerControl(optimizer = "bobyqa", optCtrl = list(maxfun = 1e5)))
+
+
+#summary(mixed.model)
+
+
+rand_effects = ranef(mixed.model)
+rand_effects = rand_effects$cno
+
+
+median.rand = median(rand_effects$`(Intercept)`)
+
+
+
+rand_effects$Z = ifelse(rand_effects$`(Intercept)` >= median.rand,1,-1)
+
+rand_effects$cno = row.names(rand_effects)
+
+iv.dat2a = left_join(iv.dat2a, rand_effects[,c("Z", "cno")], by = "cno")
+
+#proportion of compliance
+
+
+#mean(iv.dat2a$A == 1 & iv.dat2a$Z == 1) - mean(iv.dat2a$A == 1 & iv.dat2a$Z == - 1)
+
+cutoff = c(90, 180)
+
+n.sample = NA
+compliance.prob = NA
+for(i in 1:length(cutoff)){
+
+    temp.dat =  iv.dat2a %>% filter(Time_baseline_2nd_line < cutoff[i])
+   n.sample[i] = temp.dat %>% nrow()
+  
+   compliance.prob[i] = mean(temp.dat$A == 1 & temp.dat$Z == 1)/mean(temp.dat$Z == 1) - mean(temp.dat$A == 1 & temp.dat$Z == -1)/mean(temp.dat$Z == -1)
+}
+
+plot(x = n.sample, y = compliance.prob )
+```
+
+
+```{r}
+iv.dat2a %>% colnames()
+
+logit.mod = glm(as.factor(A) ~ Z, data = iv.dat2a[iv.dat2a$Time_baseline_2nd_line <= 90,], family = binomial())
+summary(logit.mod)
+```
+
+
+```{r echo = FALSE}
+barplot(sort(rand_effects$`(Intercept)`))
+abline(h = median.rand)
+```
+
+
+## UPDRS III
+
+```{r}
+
+extract_number <- function(x) {
+  num_str <- gsub("\\s*\\(.*?\\)", "", x)  # Remove the part inside the parentheses
+  as.numeric(num_str)  # Convert the remaining string to a numeric value
+}
+
+
+sel.cov = c("updrs_1", "updrs_2" , "updrs_3" , "time_from_diagnosis.2nd" , "levodopa_dose.2nd",
+            "gender" , "age.2nd" ,"bmi", "dys","fluc", "nausea", "sleep", "Time_since_first_Levo")
+
+#sel.cov = c("updrs_1", "updrs_2" , "updrs_3" , "time_from_diagnosis.2nd" , "levodopa_dose.2nd",
+#            "gender" , "age.2nd" ,"bmi", "dys","fluc", "nausea", "sleep")
+
+outcome = "outcome_updrs3"
+
+updrs.opt = matrix(nrow = length(cutoff), ncol = 3)
+DR.dist = list()
+updrs.opt.owl =  matrix(nrow = length(cutoff), ncol = 3)
+DR.dist.owl = list()
+svm.coefficient.iv.owl = matrix(nrow = length(sel.cov) + 1, ncol = length(cutoff))
+svm.coefficient.owl = svm.coefficient.iv.owl 
+
+#iv.dat2a = iv.dat2a %>% filter(!(patno %in% remove.patno))
+#iv.dat2a = iv.dat2a %>% filter(outcome_updrs3 >= 5 & outcome_updrs3 <= 40 )
+
+for(i in 1:length(cutoff)){
+  
+    print(cutoff[i])
+ temp.result = sim.updrs.func(FUN = fit.iv.owl.bt.ls1.postcept , dat = iv.dat2a %>% filter(Time_baseline_2nd_line <= cutoff[i]), outcome.col = outcome, kernel = "linear", covariates = sel.cov, plot.title = "UPDRS I", lb = 0, logistic = T)
+
+   #temp.result.owl = sim.updrs.func(FUN = fit.owl.mr.sim, dat = iv.dat2a %>% filter(Time_baseline_2nd_line <= cutoff[i]), outcome.col = outcome, kernel = "linear", covariates = sel.cov, plot.title = "UPDRS I", lb = 0.1, logistic = T)
+   
+   temp.result.owl = sim.updrs.func(FUN = fit.owl.bt.ls1.postcept, dat = iv.dat2a %>% filter(Time_baseline_2nd_line <= cutoff[i]), outcome.col = outcome, kernel = "linear", covariates = sel.cov, plot.title = "UPDRS I", lb = 0, logistic = T)
+   
+updrs.opt[i,] = temp.result$MR 
+DR.dist[[i]] = temp.result$DR.est
+svm.coefficient.iv.owl[,i] = temp.result$decision.coef
+svm.coefficient.owl[,i] = temp.result.owl$decision.coef
+ 
+ updrs.opt.owl[i,] = temp.result.owl$MR
+ DR.dist.owl[[i]] = temp.result.owl$DR.est
+ 
+}
+
+
+#updrs.opt = updrs.opt[,c(2,4,6)] 
+colnames(updrs.opt)= c("Optimal", "MAOB only", "DRA only")
+updrs.opt = as.data.frame(updrs.opt)
+updrs.opt$cut.off.day = cutoff
+updrs.opt$Optimal.OWL = updrs.opt.owl[,1]
+updrs.opt = updrs.opt %>% select(cut.off.day, Optimal.OWL, Optimal, `MAOB only`, `DRA only`)
+updrs.opt$Sample.size = n.sample
+
+rownames(svm.coefficient.iv.owl) = c("intercept", sel.cov)
+rownames(svm.coefficient.owl) = c("Intercept", sel.cov)
+colnames(updrs.opt) = c("Cut off day",  "Optimal OWL", "Optimal",  "MAOB only", "DRA only", "Sample Size")
+
+df.plt = data.frame(cutoff = cutoff, sample.size = n.sample, value.function = c(extract_number(updrs.opt[,"Optimal"]), extract_number(updrs.opt[,"Optimal OWL"]), extract_number(updrs.opt[,"MAOB only"]), extract_number(updrs.opt[,"DRA only"])) ,regime = c(rep("Optimal", nrow(updrs.opt) ), rep("Optimal OWL", nrow(updrs.opt) ), rep("MAOB", nrow(updrs.opt)), rep("DRA", nrow(updrs.opt))))
+
+coef.tab = cbind(svm.coefficient.iv.owl, svm.coefficient.owl)
+colnames(coef.tab) = c("90 days", "180 days", "90 days", "180 days") 
+
+
+```
+
+
+```{r}
+kable(updrs.opt)
+```
+
+
+```{r}
+kable(coef.tab)
+```
+
+## IV OWL decision rules
+
+### 180 days cutoff 
+
+```{r}
+temp.180.iv.owl = lapply(1:360, FUN = plt.decision, dat = iv.dat2a %>% filter(Time_baseline_2nd_line <= 180), covariates = sel.cov, target.covariate = c("levodopa_dose.2nd", "Time_since_first_Levo"), kernel.type = "linear", degree.poly = 2, outcome.col = outcome, minimize = T, complier = F, center.outcome = T, lb = 0)
+
+temp.180.iv.owl = temp.180.iv.owl[!is.na(temp.180.iv.owl)]
+
+plt.180.iv.owl = Reduce("+", temp.180.iv.owl)/length(temp.180.iv.owl)
+plt.180.iv.owl$Time_since_first_Levo =  plt.180.iv.owl$Time_since_first_Levo/365 #convert it to years
+
+updrs3.no.adverse.plt = ggplot(data = plt.180.iv.owl %>% filter( gender == 0, dys == 0, fluc == 0 & nausea == 0 & sleep == 0 ) , aes(x = levodopa_dose.2nd, y = Time_since_first_Levo, fill = trt)) +
+  geom_tile() +  # or geom_raster()
+  scale_fill_gradient(limits = c(0, 1)) +
+  labs(fill =  "DRA (%)") + ggtitle("Female patients with no adverse events") + labs(x = "Levodopa Dose (mg)", y = "Levodopa Duration (years)")
+
+updrs3.nausea.plt = ggplot(data = plt.180.iv.owl %>% filter(gender == 0, dys == 0, fluc == 0 & nausea == 1 & sleep == 0), aes(x = levodopa_dose.2nd, y = Time_since_first_Levo, fill = trt)) +
+  geom_tile() +  # or geom_raster()
+  scale_fill_gradient(limits = c(0, 1)) +
+  labs(fill = "DRA (%)") + ggtitle("Female patients with nausea") + labs(x = "Levodopa Dose (mg)", y = "Levodopa Duration (years)")
+
+
+updrs3.insomnia.plt = ggplot(data = plt.180.iv.owl %>% filter(gender == 0, dys == 0, fluc == 0 & nausea == 0 & sleep == 1 ) , aes(x = levodopa_dose.2nd, y = Time_since_first_Levo, fill = trt)) +
+  geom_tile() +  # or geom_raster()
+  scale_fill_gradient(limits = c(0, 1)) +
+  labs(fill = "DRA (%)") + ggtitle("Female patients with insomnia") + labs(x = "Levodopa Dose (mg)", y = "Levodopa Duration (years)")
+
+
+updrs3.nausea.insomnia.plt = ggplot(data = plt.180.iv.owl %>% filter(gender == 0, dys == 0, fluc == 0 & nausea == 1 & sleep == 1 ) , aes(x = levodopa_dose.2nd, y = Time_since_first_Levo, fill = trt)) +
+  geom_tile() +  # or geom_raster()
+  scale_fill_gradient(limits = c(0, 1)) +
+  labs(fill =  "DRA (%)") + ggtitle("Female patients with nausea and insomnia") + labs(x = "Levodopa Dose (mg)", y = "Levodopa Duration (years)")
+
+# male patients
+
+updrs3.no.adverse.plt.m = ggplot(data = plt.180.iv.owl %>% filter( gender == 1, dys == 0, fluc == 0 & nausea == 0 & sleep == 0 ) , aes(x = levodopa_dose.2nd, y = Time_since_first_Levo, fill = trt)) +
+  geom_tile() +  # or geom_raster()
+  scale_fill_gradient(limits = c(0, 1)) +
+  labs(fill =  "DRA (%)") + ggtitle("Male patients with no adverse events") + labs(x = "Levodopa Dose (mg)", y = "Levodopa Duration (years)")
+
+updrs3.nausea.plt.m = ggplot(data = plt.180.iv.owl %>% filter(gender == 1, dys == 0, fluc == 0 & nausea == 1 & sleep == 0), aes(x = levodopa_dose.2nd, y = Time_since_first_Levo, fill = trt)) +
+  geom_tile() +  # or geom_raster()
+  scale_fill_gradient(limits = c(0, 1)) +
+  labs(fill = "DRA (%)") + ggtitle("Male patients with nausea") + labs(x = "Levodopa Dose (mg)", y = "Levodopa Duration (years)")
+
+
+updrs3.insomnia.plt.m = ggplot(data = plt.180.iv.owl %>% filter(gender == 1, dys == 0, fluc == 0 & nausea == 0 & sleep == 1 ) , aes(x = levodopa_dose.2nd, y = Time_since_first_Levo, fill = trt)) +
+  geom_tile() +  # or geom_raster()
+  scale_fill_gradient(limits = c(0, 1)) +
+  labs(fill = "DRA (%)") + ggtitle("Male patients with insomnia") + labs(x = "Levodopa Dose (mg)", y = "Levodopa Duration (years)")
+
+
+updrs3.nausea.insomnia.plt.m = ggplot(data = plt.180.iv.owl %>% filter(gender == 1, dys == 0, fluc == 0 & nausea == 1 & sleep == 1 ) , aes(x = levodopa_dose.2nd, y = Time_since_first_Levo, fill = trt)) +
+  geom_tile() +  # or geom_raster()
+  scale_fill_gradient(limits = c(0, 1)) +
+  labs(fill =  "DRA (%)") + ggtitle("Male patients with nausea and insomnia") + labs(x = "Levodopa Dose (mg)", y = "Levodopa Duration (years)")
+
+
+grid.arrange(updrs3.no.adverse.plt, updrs3.nausea.plt,
+             updrs3.insomnia.plt, updrs3.nausea.insomnia.plt,
+             ncol = 2)
+
+
+```
+
+
+```{r}
+grid.arrange(updrs3.no.adverse.plt.m, updrs3.nausea.plt.m, 
+             updrs3.insomnia.plt.m, updrs3.nausea.insomnia.plt.m,
+             ncol = 2)
+```
+
+
+#### Motor complications (180 days cutoff)
+
+```{r }
+
+updrs3.no.compl.plt = ggplot(data = plt.180.iv.owl %>% filter( gender == 0, dys == 0, fluc == 0 & nausea == 0 & sleep == 0 ) , aes(x = levodopa_dose.2nd, y = Time_since_first_Levo, fill = trt)) +
+  geom_tile() +  # or geom_raster()
+  scale_fill_gradient(limits = c(0, 1)) +
+  labs(fill =  "DRA (%)") + ggtitle("Female patients with no motor complications") + labs(x = "Levodopa Dose (mg)", y = "Levodopa Duration (years)")
+
+
+updrs3.dyskinesia.plt = ggplot(data = plt.180.iv.owl %>% filter(gender == 0, dys == 1, fluc == 0 & nausea == 0 & sleep == 0), aes(x = levodopa_dose.2nd, y = Time_since_first_Levo, fill = trt)) +
+  geom_tile() +  # or geom_raster()
+  scale_fill_gradient(limits = c(0, 1)) +
+  labs(fill = "DRA (%)") + ggtitle("Female patients with dyskinesia") + labs(x = "Levodopa Dose (mg)", y = "Levodopa Duration (years)")
+
+
+updrs3.fluc.plt = ggplot(data = plt.180.iv.owl %>% filter(gender == 0, dys == 0, fluc == 1 & nausea == 0 & sleep == 0 ) , aes(x = levodopa_dose.2nd, y = Time_since_first_Levo, fill = trt)) +
+  geom_tile() +  # or geom_raster()
+  scale_fill_gradient(limits = c(0, 1)) +
+  labs(fill = "DRA (%)") + ggtitle("Female patients with fluctuation") + labs(x = "Levodopa Dose (mg)", y = "Levodopa Duration (years)")
+
+updrs3.dyskinesia.fluc.plt = ggplot(data = plt.180.iv.owl %>% filter(gender == 0, dys == 1, fluc == 1 & nausea == 0 & sleep == 0 ) , aes(x = levodopa_dose.2nd, y = Time_since_first_Levo, fill = trt)) +
+  geom_tile() +  # or geom_raster()
+  scale_fill_gradient(limits = c(0, 1)) +
+  labs(fill =  "DRA (%)") + ggtitle("Female patients with dyskinesia and fluctuation") + labs(x = "Levodopa Dose (mg)", y = "Levodopa Duration (years)")
+
+#Male patients
+
+updrs3.no.compl.plt.m = ggplot(data = plt.180.iv.owl %>% filter( gender == 1, dys == 0, fluc == 0 & nausea == 0 & sleep == 0 ) , aes(x = levodopa_dose.2nd, y = Time_since_first_Levo, fill = trt)) +
+  geom_tile() +  # or geom_raster()
+  scale_fill_gradient(limits = c(0, 1)) +
+  labs(fill =  "DRA (%)") + ggtitle("Male patients with no motor complications") + labs(x = "Levodopa Dose (mg)", y = "Levodopa Duration (years)")
+
+
+updrs3.dyskinesia.plt.m = ggplot(data = plt.180.iv.owl %>% filter(gender == 1, dys == 1, fluc == 0 & nausea == 0 & sleep == 0), aes(x = levodopa_dose.2nd, y = Time_since_first_Levo, fill = trt)) +
+  geom_tile() +  # or geom_raster()
+  scale_fill_gradient(limits = c(0, 1)) +
+  labs(fill = "DRA (%)") + ggtitle("Male patients with dyskinesia") + labs(x = "Levodopa Dose (mg)", y = "Levodopa Duration (years)")
+
+
+updrs3.fluc.plt.m = ggplot(data = plt.180.iv.owl %>% filter(gender == 1, dys == 0, fluc == 1 & nausea == 0 & sleep == 0 ) , aes(x = levodopa_dose.2nd, y = Time_since_first_Levo, fill = trt)) +
+  geom_tile() +  # or geom_raster()
+  scale_fill_gradient(limits = c(0, 1)) +
+  labs(fill = "DRA (%)") + ggtitle("Male patients with fluctuation") + labs(x = "Levodopa Dose (mg)", y = "Levodopa Duration (years)")
+
+updrs3.dyskinesia.fluc.plt.m = ggplot(data = plt.180.iv.owl %>% filter(gender == 1, dys == 1, fluc == 1 & nausea == 0 & sleep == 0 ) , aes(x = levodopa_dose.2nd, y = Time_since_first_Levo, fill = trt)) +
+  geom_tile() +  # or geom_raster()
+  scale_fill_gradient(limits = c(0, 1)) +
+  labs(fill =  "DRA (%)") + ggtitle("Male patients with dyskinesia and fluctuation") + labs(x = "Levodopa Dose (mg)", y = "Levodopa Duration (years)")
+
+grid.arrange(updrs3.no.compl.plt, updrs3.dyskinesia.plt, updrs3.fluc.plt, updrs3.dyskinesia.fluc.plt, ncol = 2)
+
+
+```
+
+```{r}
+grid.arrange(updrs3.no.compl.plt.m, updrs3.dyskinesia.plt.m, updrs3.fluc.plt.m, updrs3.dyskinesia.fluc.plt.m, ncol = 2)
+```
+
+
+## OWL decision rules
+
+### 180 days cutoff 
+
+```{r }
+temp.180.owl = lapply(1:360, FUN = plt.decision.owl, dat = iv.dat2a %>% filter(Time_baseline_2nd_line <= 180), covariates = sel.cov, target.covariate = c("levodopa_dose.2nd", "Time_since_first_Levo"), kernel.type = "linear", degree.poly = 2, outcome.col = outcome, minimize = T, complier = F, center.outcome = T, lb = 0)
+
+temp.180.owl = temp.180.owl[!is.na(temp.180.owl)]
+
+plt.180.owl = Reduce("+", temp.180.owl)/length(temp.180.owl)
+plt.180.owl$Time_since_first_Levo =  plt.180.owl$Time_since_first_Levo/365 #convert it to years
+
+updrs3.no.adverse.plt = ggplot(data = plt.180.owl %>% filter( gender == 0, dys == 0, fluc == 0 & nausea == 0 & sleep == 0 ) , aes(x = levodopa_dose.2nd, y = Time_since_first_Levo, fill = trt)) +
+  geom_tile() +  # or geom_raster()
+  scale_fill_gradient(limits = c(0, 1)) +
+  labs(fill =  "DRA (%)") + ggtitle("Female patients with no adverse events") + labs(x = "Levodopa Dose (mg)", y = "Levodopa Duration (years)")
+
+updrs3.nausea.plt = ggplot(data = plt.180.owl %>% filter(gender == 0, dys == 0, fluc == 0 & nausea == 1 & sleep == 0), aes(x = levodopa_dose.2nd, y = Time_since_first_Levo, fill = trt)) +
+  geom_tile() +  # or geom_raster()
+  scale_fill_gradient(limits = c(0, 1)) +
+  labs(fill = "DRA (%)") + ggtitle("Female patients with nausea") + labs(x = "Levodopa Dose (mg)", y = "Levodopa Duration (years)")
+
+
+updrs3.insomnia.plt = ggplot(data = plt.180.owl %>% filter(gender == 0, dys == 0, fluc == 0 & nausea == 0 & sleep == 1 ) , aes(x = levodopa_dose.2nd, y = Time_since_first_Levo, fill = trt)) +
+  geom_tile() +  # or geom_raster()
+  scale_fill_gradient(limits = c(0, 1)) +
+  labs(fill = "DRA (%)") + ggtitle("Female patients with insomnia") + labs(x = "Levodopa Dose (mg)", y = "Levodopa Duration (years)")
+
+
+updrs3.nausea.insomnia.plt = ggplot(data = plt.180.owl %>% filter(gender == 0, dys == 0, fluc == 0 & nausea == 1 & sleep == 1 ) , aes(x = levodopa_dose.2nd, y = Time_since_first_Levo, fill = trt)) +
+  geom_tile() +  # or geom_raster()
+  scale_fill_gradient(limits = c(0, 1)) +
+  labs(fill =  "DRA (%)") + ggtitle("Female patients with nausea and insomnia") + labs(x = "Levodopa Dose (mg)", y = "Levodopa Duration (years)")
+
+# male patients
+
+updrs3.no.adverse.plt.m = ggplot(data = plt.180.owl %>% filter( gender == 1, dys == 0, fluc == 0 & nausea == 0 & sleep == 0 ) , aes(x = levodopa_dose.2nd, y = Time_since_first_Levo, fill = trt)) +
+  geom_tile() +  # or geom_raster()
+  scale_fill_gradient(limits = c(0, 1)) +
+  labs(fill =  "DRA (%)") + ggtitle("Male patients with no adverse events") + labs(x = "Levodopa Dose (mg)", y = "Levodopa Duration (years)")
+
+updrs3.nausea.plt.m = ggplot(data = plt.180.owl %>% filter(gender == 1, dys == 0, fluc == 0 & nausea == 1 & sleep == 0), aes(x = levodopa_dose.2nd, y = Time_since_first_Levo, fill = trt)) +
+  geom_tile() +  # or geom_raster()
+  scale_fill_gradient(limits = c(0, 1)) +
+  labs(fill = "DRA (%)") + ggtitle("Male patients with nausea") + labs(x = "Levodopa Dose (mg)", y = "Levodopa Duration (years)")
+
+
+updrs3.insomnia.plt.m = ggplot(data = plt.180.owl %>% filter(gender == 1, dys == 0, fluc == 0 & nausea == 0 & sleep == 1 ) , aes(x = levodopa_dose.2nd, y = Time_since_first_Levo, fill = trt)) +
+  geom_tile() +  # or geom_raster()
+  scale_fill_gradient(limits = c(0, 1)) +
+  labs(fill = "DRA (%)") + ggtitle("Male patients with insomnia") + labs(x = "Levodopa Dose (mg)", y = "Levodopa Duration (years)")
+
+
+updrs3.nausea.insomnia.plt.m = ggplot(data = plt.180.owl %>% filter(gender == 1, dys == 0, fluc == 0 & nausea == 1 & sleep == 1 ) , aes(x = levodopa_dose.2nd, y = Time_since_first_Levo, fill = trt)) +
+  geom_tile() +  # or geom_raster()
+  scale_fill_gradient(limits = c(0, 1)) +
+  labs(fill =  "DRA (%)") + ggtitle("Male patients with nausea and insomnia") + labs(x = "Levodopa Dose (mg)", y = "Levodopa Duration (years)")
+
+
+grid.arrange(updrs3.no.adverse.plt, updrs3.nausea.plt,
+             updrs3.insomnia.plt, updrs3.nausea.insomnia.plt,
+             ncol = 2)
+
+
+```
+
+
+```{r}
+
+grid.arrange(updrs3.no.adverse.plt.m, updrs3.nausea.plt.m, 
+             updrs3.insomnia.plt.m, updrs3.nausea.insomnia.plt.m,
+             ncol = 2)
+
+```
+
+
+#### Motor complications (180 days cutoff)
+
+```{r }
+
+updrs3.no.compl.plt = ggplot(data = plt.180.owl %>% filter( gender == 0, dys == 0, fluc == 0 & nausea == 0 & sleep == 0 ) , aes(x = levodopa_dose.2nd, y = Time_since_first_Levo, fill = trt)) +
+  geom_tile() +  # or geom_raster()
+  scale_fill_gradient(limits = c(0, 1)) +
+  labs(fill =  "DRA (%)") + ggtitle("Female patients with no motor complications") + labs(x = "Levodopa Dose (mg)", y = "Levodopa Duration (years)")
+
+
+updrs3.dyskinesia.plt = ggplot(data = plt.180.owl %>% filter(gender == 0, dys == 1, fluc == 0 & nausea == 0 & sleep == 0), aes(x = levodopa_dose.2nd, y = Time_since_first_Levo, fill = trt)) +
+  geom_tile() +  # or geom_raster()
+  scale_fill_gradient(limits = c(0, 1)) +
+  labs(fill = "DRA (%)") + ggtitle("Female patients with dyskinesia") + labs(x = "Levodopa Dose (mg)", y = "Levodopa Duration (years)")
+
+
+updrs3.fluc.plt = ggplot(data = plt.180.owl %>% filter(gender == 0, dys == 0, fluc == 1 & nausea == 0 & sleep == 0 ) , aes(x = levodopa_dose.2nd, y = Time_since_first_Levo, fill = trt)) +
+  geom_tile() +  # or geom_raster()
+  scale_fill_gradient(limits = c(0, 1)) +
+  labs(fill = "DRA (%)") + ggtitle("Female patients with fluctuation") + labs(x = "Levodopa Dose (mg)", y = "Levodopa Duration (years)")
+
+updrs3.dyskinesia.fluc.plt = ggplot(data = plt.180.owl %>% filter(gender == 0, dys == 1, fluc == 1 & nausea == 0 & sleep == 0 ) , aes(x = levodopa_dose.2nd, y = Time_since_first_Levo, fill = trt)) +
+  geom_tile() +  # or geom_raster()
+  scale_fill_gradient(limits = c(0, 1)) +
+  labs(fill =  "DRA (%)") + ggtitle("Female patients with dyskinesia and fluctuation") + labs(x = "Levodopa Dose (mg)", y = "Levodopa Duration (years)")
+
+#Male patients
+
+updrs3.no.compl.plt.m = ggplot(data = plt.180.owl %>% filter( gender == 1, dys == 0, fluc == 0 & nausea == 0 & sleep == 0 ) , aes(x = levodopa_dose.2nd, y = Time_since_first_Levo, fill = trt)) +
+  geom_tile() +  # or geom_raster()
+  scale_fill_gradient(limits = c(0, 1)) +
+  labs(fill =  "DRA (%)") + ggtitle("Male patients with no motor complications") + labs(x = "Levodopa Dose (mg)", y = "Levodopa Duration (years)")
+
+
+updrs3.dyskinesia.plt.m = ggplot(data = plt.180.owl %>% filter(gender == 1, dys == 1, fluc == 0 & nausea == 0 & sleep == 0), aes(x = levodopa_dose.2nd, y = Time_since_first_Levo, fill = trt)) +
+  geom_tile() +  # or geom_raster()
+  scale_fill_gradient(limits = c(0, 1)) +
+  labs(fill = "DRA (%)") + ggtitle("Male patients with dyskinesia") + labs(x = "Levodopa Dose (mg)", y = "Levodopa Duration (years)")
+
+
+updrs3.fluc.plt.m = ggplot(data = plt.180.owl %>% filter(gender == 1, dys == 0, fluc == 1 & nausea == 0 & sleep == 0 ) , aes(x = levodopa_dose.2nd, y = Time_since_first_Levo, fill = trt)) +
+  geom_tile() +  # or geom_raster()
+  scale_fill_gradient(limits = c(0, 1)) +
+  labs(fill = "DRA (%)") + ggtitle("Male patients with fluctuation") + labs(x = "Levodopa Dose (mg)", y = "Levodopa Duration (years)")
+
+updrs3.dyskinesia.fluc.plt.m = ggplot(data = plt.180.owl %>% filter(gender == 1, dys == 1, fluc == 1 & nausea == 0 & sleep == 0 ) , aes(x = levodopa_dose.2nd, y = Time_since_first_Levo, fill = trt)) +
+  geom_tile() +  # or geom_raster()
+  scale_fill_gradient(limits = c(0, 1)) +
+  labs(fill =  "DRA (%)") + ggtitle("Male patients with dyskinesia and fluctuation") + labs(x = "Levodopa Dose (mg)", y = "Levodopa Duration (years)")
+
+grid.arrange(updrs3.no.compl.plt, updrs3.dyskinesia.plt, updrs3.fluc.plt, updrs3.dyskinesia.fluc.plt, ncol = 2)
+
+```
+```{r}
+grid.arrange(updrs3.no.compl.plt.m, updrs3.dyskinesia.plt.m, updrs3.fluc.plt.m, updrs3.dyskinesia.fluc.plt.m, ncol = 2)
+
+```
+
+
