@@ -4,6 +4,8 @@
 #'
 #' @param itr_formula A formula specifying the independent variables for treatment rule optimization.
 #' @param prop_formula A formula specifying the independent variables for propensity score modeling.
+#' @param mean_formula A formula specifying the independent variables for mean outcome model.
+#' @param method Choose either "mr" for multiply robust method or "ipw" for inverse probability weighting method
 #' @param trt A character string specifying the name of the treatment variable in the dataset.
 #' @param dat A data frame containing the data for the model.
 #' @param kernel A character string specifying the kernel type for the SVM (default is "linear").
@@ -12,15 +14,22 @@
 #' @return A numeric vector of predicted treatment decisions.
 #' @examples
 #' # Example usage
+#' sim_dat = dat.gen.owl(23, nsample = 250)
+#'
+#' model.owl = fit.owl(itr_formula = ~ X.1 + X.2 + X.3, prop_formula = ~ X.1 + X.2, mean_formula = ~ A*(X.1 + X.2) - X.1 - X.2, method = "mr", trt = "A", outcome = "outcome", dat = sim_dat,
+#'                    center.outcome = F, seed = 98734)
+#'
+#' pred.val = predict(model.owl$model, newdata = sim_dat)
+#' 
 #' dat <- data.frame(Y = rnorm(100), A = rbinom(100, 1, 0.5), X1 = rnorm(100), X2 = rnorm(100))
 #' itr_formula <- ~ X1 + X2
 #' prop_formula <- ~ X1 + X2
 #' fit.owl(itr_formula, prop_formula, trt = "A", dat = dat)
 
-fit.owl = function(itr_formula, prop_formula, trt, outcome, dat, 
+fit.owl = function(itr_formula, prop_formula, mean_formula = NULL,method, trt, outcome, dat, 
                    na.rm = T, minimize = F, center.outcome = F, 
-                   kernel = "linear", cross = 10, scale = T, true.value, ...){
-     
+                   kernel = "linear", cross = 10, scale = T, seed, ...){
+    set.seed(seed)
     ## Error handling
     if (!inherits(itr_formula, "formula")) stop("itr_formula must be a formula object.")
     if (!inherits(prop_formula, "formula")) stop("prop_formula must be a formula object.")
@@ -49,6 +58,9 @@ fit.owl = function(itr_formula, prop_formula, trt, outcome, dat,
     names(dat)[names(dat) ==  trt] = "A"
     names(dat)[names(dat) == outcome] = "Y" 
     
+    # spliting data into training and testing set
+    dat$train = sample(c(T,F), nrow(dat), prob = c(0.7,0.3), replace = T )
+    
     # remove missing data
     if (na.rm) {
       columns_to_check <- unique(c(itr_vars, prop_vars, "A", "Y"))
@@ -71,20 +83,47 @@ fit.owl = function(itr_formula, prop_formula, trt, outcome, dat,
   
     ## Propensity score model
     
-    #convert it to a formula
+    #convert to a formula
     logistic.formula = paste( "as.factor(A)" , deparse(prop_formula), collapse = "")  
     
     logistic.A = glm(logistic.formula, data = dat, family = binomial(link = "logit"))
     
     pred.A = predict(logistic.A, type = "response", newdata = dat)
     dat$pred = ifelse(dat$A == 1, pred.A, 1 - pred.A)
-
     
-    dat$weight = with(dat, Y/pred)
-    dat$fitted.owl = NA
+    ## Mean outcome model
     
+    #convert to a formula
+    if(is.null(mean_formula)){
+      lm.formula = paste("Y", deparse(prop_formula), collapse = "" )
+    }else{ lm.formula = paste("Y", deparse(mean_formula), collapse = "" )  }
+    
+    lm.mod = lm(lm.formula, data = dat)
+   
+    # Add predictions to the dataset
+    dat$Y.pred <- predict(lm.mod)
+    
+    #estimating E[Y|A = 1, ...]
+    dat_mod = dat
+    dat_mod$A = 1
+    dat$Y.A1 = predict(lm.mod, newdata = dat_mod)
+    #estimating E[Y|A = -1, ...]
+    dat_mod$A = -1
+    dat$Y.An1 = predict(lm.mod, newdata = dat_mod)
     
     ## calculate the weight
+    
+    dat$weight = if(method == "ipw"){
+                    with(dat, Y/pred)
+    }else if(method == "mr"){
+      
+      with(dat, (dat$Y - Y.pred)/pred + A*(Y.A1 - Y.An1)) 
+    }else{
+      stop("Invalid method. Choose either 'ipw' or 'mr'.")
+    }
+    
+
+    dat$fitted.owl = NA
     
     dat$lab = sign(dat$weight)*dat$A
     
@@ -92,28 +131,71 @@ fit.owl = function(itr_formula, prop_formula, trt, outcome, dat,
     formula_str <- paste("as.factor(lab)", deparse(itr_formula), collapse = "")
     formula.owl <- as.formula(formula_str)
     
-    
-    mod.owl = WeightSVM::wsvm(formula.owl, data = dat, weight = abs(dat$weight), kernel = "linear", 
+    ## Model fitting
+    mod.owl = WeightSVM::wsvm(formula.owl, data = dat[dat$train,], weight = abs(dat$weight[dat$train]), kernel = "linear", 
                    cross = 10, scale = T) #OWL method
     
+    # Predicting 
+    fitted.owl = predict(mod.owl, newdata = dat[!dat$train,])
     
-    ## MODEL FITTING
-    fitted.owl = predict(mod.owl, newdata = dat)
-    fitted.owl = as.numeric(as.character(fitted.owl))
-  
-    return( table(fitted.owl, true.value) )
+    
+    
+    fitted.owl = as.numeric(as.character(fitted.owl)) #opt treatment regimes
+    fitted.A = rep(-1, length(fitted.owl)) #always -1 strategy. A is -1 
+    fitted.B = rep(1, length(fitted.owl)) #always 1 strategy. B is 1 
+    
+    
+    #return(table(fitted.owl, true.value[!dat$train]))
+    
+    owl.coef = svm.coef(mod.owl, type = "line")
+    
+    
+    ## Evaluating the value function
 
+    # estimating value function with IPW
+    value.opt = mean((dat$Y[!dat$train]*I(fitted.owl == dat$A[!dat$train]))/dat$pred[!dat$train])
+    value.A =  mean((dat$Y[!dat$train]*I(fitted.A == dat$A[!dat$train]) )/dat$pred[!dat$train] )
+    value.B = mean((dat$Y[!dat$train]*I(fitted.B == dat$A[!dat$train]))/dat$pred[!dat$train])
+    value.behavior =  mean(dat$Y[!dat$train]) 
     
+    # estimating value function with MR
+    #value function mr
+    value.opt.mr = value.opt - mean((dat$Y.pred[!dat$train]*I(fitted.owl == dat$A[!dat$train]))/dat$pred[!dat$train] 
+                                     - I( fitted.owl == 1)*dat$Y.A1[!dat$train] - I( fitted.owl == -1)*dat$Y.An1[!dat$train]) 
+    
+    value.A.mr = value.A - mean((dat$Y.pred[!dat$train]*I(fitted.A == dat$A[!dat$train]))/dat$pred[!dat$train] 
+                                       - I(fitted.A == 1)*dat$Y.A1[!dat$train] - I(fitted.A == -1)*dat$Y.An1[!dat$train]) 
+    
+    value.B.mr = value.B - mean((dat$Y.pred[!dat$train]*I(fitted.B == dat$A[!dat$train]))/dat$pred[!dat$train] 
+                                     - I(fitted.B == 1)*dat$Y.A1[!dat$train] - I(fitted.B == -1)*dat$Y.An1[!dat$train])
+    
+    #estimated variance
+    var.opt.mr = var((dat$Y[!dat$train]*I(fitted.owl == dat$A[!dat$train]))/dat$pred[!dat$train] - 
+                       ((dat$Y.pred[!dat$train]*I(fitted.owl == dat$A[!dat$train]))/dat$pred[!dat$train] - 
+                         I( fitted.owl == 1)*dat$Y.A1[!dat$train] - I( fitted.owl == -1)*dat$Y.An1[!dat$train]))/sum( 1 - dat$train ) 
+    
+    var.A.mr = var((dat$Y[!dat$train]*I(fitted.A == dat$A[!dat$train]))/dat$pred[!dat$train] - 
+                       ((dat$Y.pred[!dat$train]*I(fitted.A == dat$A[!dat$train]))/dat$pred[!dat$train] - 
+                          I( fitted.A == 1)*dat$Y.A1[!dat$train] - I( fitted.A == -1)*dat$Y.An1[!dat$train]))/sum( 1 - dat$train ) 
+    
+    var.B.mr = var((dat$Y[!dat$train]*I(fitted.B == dat$A[!dat$train]))/dat$pred[!dat$train] - 
+                       ((dat$Y.pred[!dat$train]*I(fitted.B == dat$A[!dat$train]))/dat$pred[!dat$train] - 
+                          I( fitted.B == 1)*dat$Y.A1[!dat$train] - I( fitted.B == -1)*dat$Y.An1[!dat$train]))/sum( 1 - dat$train ) 
+    
+    #return the results 
+    value.function =data.frame(est.ipw = c(value.opt, value.A, value.B), 
+                               est.mr = c(value.opt.mr, value.A.mr, value.B.mr))
+    colnames(value.function) = c("IPW estimator", "MR estimator")
+    rownames(value.function) = c("Opt Trt.", "Trt A", "Trt B")
+    
+    var.value.function = c(var.opt.mr, var.A.mr, var.B.mr)
+    names(var.value.function) = c("Var Opt.", "Var Trt A.", "Var Trt B.")
+    
+    return(list(model = mod.owl, 
+                value.funcion = value.function, 
+                variance = var.value.function ) )
 }
 
-## unit test
-sim_dat = dat.gen.owl(23, nsample = 250)
-colnames(sim_dat)[colnames(sim_dat) == "Y"] = "outcome"
-
-sim_dat$X.1[12] = NA
-
-fit.owl(itr_formula = ~ X.2 + X.3, prop_formula = ~ X.2 + X.3, trt = "A", outcome = "outcome", dat = sim_dat,
-        true.value = sim_dat$opt.trt, center.outcome = T)
 
 
-setdiff(c("X.1", "X.4"), names(sim_dat))
+
