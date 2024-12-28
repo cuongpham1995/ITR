@@ -1,4 +1,4 @@
-fit.iv.owl = function(itr_formula, iv_formula, trt_formula, mean_formula = NULL, trt, iv, outcome, dat, 
+fit.iv.owl = function(itr_formula, iv_formula, trt_formula, mean_formula = NULL, method, trt, iv, outcome, dat, 
                       na.rm = T, minimize = F, center.outcome = F, 
                       kernel = "linear", cross = 10, scale = T, seed, ...){ 
   
@@ -99,7 +99,9 @@ fit.iv.owl = function(itr_formula, iv_formula, trt_formula, mean_formula = NULL,
   
   #calculating the weight
   dat$delta.pred = dat$A.Z1 - dat$A.Zn1 #calculate the delta term
-  dat$weight = with(dat, Y*A*Z/(Z.pred*delta.pred))
+  dat$weight = if(method == "iv owl"){with(dat, Y*A*Z/(Z.pred*delta.pred))
+  }else if(method == "owl"){with(dat, Y/A.pred)
+                  }else {stop("Invalid method")}
   
   dat$fitted.owl = NA
   
