@@ -118,126 +118,141 @@ fit.iv.owl = function(itr_formula, iv_formula, trt_formula, mean_formula = NULL,
   
   
   
-  fitted.owl = as.numeric(as.character(fitted.owl)) #opt treatment regimes
-  fitted.A = rep(-1, length(fitted.owl)) #always -1 strategy. A is -1 
-  fitted.B = rep(1, length(fitted.owl)) #always 1 strategy. B is 1 
+  dat$fitted.owl = as.numeric(as.character(fitted.owl)) #opt treatment regimes
+  dat$fitted.A = rep(-1, length(fitted.owl)) #always -1 strategy. A is -1 
+  dat$fitted.B = rep(1, length(fitted.owl)) #always 1 strategy. B is 1 
   
   
-  #return(table(fitted.owl, true.value[!dat$train]))
+
   
   owl.coef = svm.coef(mod.owl, type = "line")
   names(owl.coef) = c("Intercept", itr_vars)
   
-  return(table(fitted.owl))
+
   
-  dat.bt$fitted.maob = rep(-1, nrow(dat.bt))
-  dat.bt$fitted.dra = rep(1, nrow(dat.bt))
-  # dat$fz.pred = fz.pred 
-  # dat$delta.pred = delta.pred
+  #pseudo outcome
+  dat$g.p.opt = dat$Y*dat$A*I(dat$fitted.owl == dat$A)
+  dat$g.p.A = dat$Y*dat$A*I(dat$fitted.A == dat$A)
+  dat$g.p.B = dat$Y*dat$A*I(dat$fitted.B == dat$A)
   
-  dat.bt$g.p.opt = dat.bt$outcome*dat.bt$A*I(dat.bt$fitted.owl == dat.bt$A)
-  dat.bt$g.p.MAOB = dat.bt$outcome*dat.bt$A*I(dat.bt$fitted.maob == dat.bt$A)
-  dat.bt$g.p.DRA = dat.bt$outcome*dat.bt$A*I(dat.bt$fitted.dra == dat.bt$A)
+  trt.logistic.formula = paste( "as.factor(A)" , deparse(trt_formula, width.cutoff = 500), collapse = "")
   
   ### parametric estimator of gamma
   
   ############ opt ################
   ### estimator of gamma prime
+  mean_formula2 <- mean_formula2 <- update(mean_formula, paste("~ . +", "Z"))
+  gamma.prime.opt.formula = paste("g.p.opt", deparse(mean_formula2, width.cutoff = 500), collapse = "")
+  gamma.opt.formula = paste("gamma.pseudo.opt", deparse(mean_formula, width.cutoff = 500), collapse = "")
   
-  g.p.opt.mod = lm(g.p.opt ~ Z+  updrs_1 +  updrs_2 + updrs_3 + time_from_diagnosis.2nd + levodopa_dose.2nd +
-                     gender + age.2nd  + bmi  + Time_since_first_Levo , data = dat.bt)
-  temp.dat.opt = dat.bt[,c("Z", "updrs_1", "updrs_2" , "updrs_3" , "time_from_diagnosis.2nd" , "levodopa_dose.2nd" , "gender" , "age.2nd"  ,"bmi", "Time_since_first_Levo" )]
-  temp.dat.opt$Z = -1
-  dat.bt$g.p.opt.pred = predict(g.p.opt.mod, newdata = temp.dat.opt  )   
+  g.p.opt.mod = lm(gamma.prime.opt.formula, data = dat)
+
+  dat_mod = dat
+  dat_mod$Z = - 1
+  dat$g.p.opt.pred = predict(g.p.opt.mod, newdata = dat_mod)   
+  
   
   #### estimator of gamma
   
-  #dat$gamma.pseudo.opt = (dat$g.p.opt - dat$g.p.opt.pred)*dat$Z/dat$fz.pred 
-  #dat$gamma.weight = (dat$A - pred.A1.Zn1)*dat$Z/(2*dat$fz.pred)
-  dat.bt$gamma.pseudo.opt = (dat.bt$g.p.opt - dat.bt$g.p.opt.pred)*2/(dat.bt$A - dat.bt$pred.A1.Zn1) 
-  dat.bt$gamma.weight = ((dat.bt$A - dat.bt$pred.A1.Zn1)*dat.bt$Z/(2*dat.bt$fz.pred))^2
+  dat$gamma.pseudo.opt = (dat$g.p.opt - dat$g.p.opt.pred)*2/(dat$A - dat$A.Zn1) 
+  dat$gamma.weight = ((dat$A - dat$A.Zn1)*dat$Z/(2*dat$Z.pred))^2
   
-  gamma.opt.mod = lm(gamma.pseudo.opt ~  updrs_1 +  updrs_2 + updrs_3 + time_from_diagnosis.2nd + levodopa_dose.2nd +
-                       gender + age.2nd  + bmi + Time_since_first_Levo  , data = dat.bt, weights = gamma.weight)
-  dat.bt$gamma.opt.pred = predict(gamma.opt.mod, newdata = dat.bt)
+  gamma.opt.mod = lm( gamma.opt.formula, data = dat, weights = gamma.weight)
+  dat$gamma.opt.pred = predict(gamma.opt.mod, newdata = dat)
+  
   
   #### maob ############################
   ### estimator of gamma prime
+  gamma.prime.A.formula = paste("g.p.A", deparse(mean_formula2, width.cutoff = 500), collapse = "")
+  gamma.A.formula = paste("gamma.pseudo.A", deparse(mean_formula, width.cutoff = 500), collapse = "")
   
-  g.p.maob.mod = lm(g.p.MAOB ~ Z+  updrs_1 +  updrs_2 + updrs_3 + time_from_diagnosis.2nd + levodopa_dose.2nd +
-                      gender + age.2nd  + bmi + Time_since_first_Levo  , data = dat.bt)
+  g.p.A.mod = lm(gamma.prime.A.formula, data = dat)
   
-  dat.bt$g.p.maob.pred = predict(g.p.maob.mod, newdata = temp.dat.opt)   
+  dat$g.p.A.pred = predict(g.p.A.mod, newdata = dat_mod)   
   
-  dat.bt$gamma.pseudo.maob = (dat.bt$g.p.MAOB - dat.bt$g.p.maob.pred)*2/(dat.bt$A - dat.bt$pred.A1.Zn1) 
+  dat$gamma.pseudo.A = (dat$g.p.A - dat$g.p.A.pred)*2/(dat$A - dat$A.Zn1) 
   
   ### estimator of gamma
-  gamma.maob.mod = lm(gamma.pseudo.maob ~ updrs_1 +  updrs_2 + updrs_3 + time_from_diagnosis.2nd + levodopa_dose.2nd +
-                        gender + age.2nd  + bmi + Time_since_first_Levo , data = dat.bt, weights = gamma.weight)
-  dat.bt$gamma.maob.pred = predict(gamma.maob.mod, newdata = dat.bt)
+  gamma.A.mod = lm(gamma.A.formula, data = dat, weights = gamma.weight)
+  dat$gamma.A.pred = predict(gamma.A.mod, newdata = dat)
+  
   
   ########### dra #######################################
-  ## gamma prime 
-  g.p.dra.mod = lm(g.p.DRA ~ Z+  updrs_1 +  updrs_2 + updrs_3 + time_from_diagnosis.2nd + levodopa_dose.2nd +
-                     gender + age.2nd  + bmi  + Time_since_first_Levo , data = dat.bt)
+  gamma.prime.B.formula = paste("g.p.B", deparse(mean_formula2, width.cutoff = 500), collapse = "")
+  gamma.B.formula = paste("gamma.pseudo.B", deparse(mean_formula, width.cutoff = 500), collapse = "")
   
-  dat.bt$g.p.dra.pred = predict(g.p.dra.mod, newdata = temp.dat.opt)   
+  g.p.B.mod = lm(gamma.prime.B.formula, data = dat)
   
-  dat.bt$gamma.pseudo.dra = (dat.bt$g.p.DRA - dat.bt$g.p.dra.pred)*2/(dat.bt$A - dat.bt$pred.A1.Zn1)
-  ## gamma 
-  gamma.dra.mod = lm(gamma.pseudo.dra ~ updrs_1 +  updrs_2 + updrs_3 + time_from_diagnosis.2nd + levodopa_dose.2nd +
-                       gender + age.2nd  + bmi + Time_since_first_Levo , data = dat.bt, weights = gamma.weight)
-  dat.bt$gamma.dra.pred = predict(gamma.dra.mod, newdata = dat.bt)
+  dat$g.p.B.pred = predict(g.p.B.mod, newdata = dat_mod)   
+  
+  dat$gamma.pseudo.B = (dat$g.p.B - dat$g.p.B.pred)*2/(dat$A - dat$A.Zn1) 
+  
+  ### estimator of gamma
+  gamma.B.mod = lm(gamma.B.formula, data = dat, weights = gamma.weight)
+  dat$gamma.B.pred = predict(gamma.B.mod, newdata = dat)
   
   
   #calculate the value function
-  value.opt = with(dat.bt[!dat.bt$train,], mean((outcome*I(fitted.owl == A)*Z*A*delta.marg)/( pmax(fz.pred*delta.pred,lb) )))
-  value.maob = with(dat.bt[!dat.bt$train,], mean((outcome*I(fitted.maob == A)*Z*A*delta.marg)/ pmax(fz.pred*delta.pred,lb) ))
-  value.dra = with(dat.bt[!dat.bt$train,], mean((outcome*I(fitted.dra == A)*Z*A*delta.marg)/pmax(fz.pred*delta.pred,lb)))
-  value.behavior = mean(dat.bt$outcome[!dat.bt$train]) 
+  value.opt = with(dat[!dat$train,], mean((Y*I(fitted.owl == A)*Z*A)/( Z.pred*delta.pred )))
+  value.A = with(dat[!dat$train,], mean((Y*I(fitted.A == A)*Z*A)/( Z.pred*delta.pred )))
+  value.B = with(dat[!dat$train,], mean((Y*I(fitted.B == A)*Z*A)/( Z.pred*delta.pred )))
+  value.behavior = mean(dat$Y[!dat$train]) 
   
   
   ## calculate the mr value function
   ##### opt
   
-  component1.opt = with(dat.bt[!dat.bt$train,], (outcome*I(fitted.owl == A)*Z*A*delta.marg)/pmax(fz.pred*delta.pred,lb))
-  component2.opt = with(dat.bt[!dat.bt$train,],  (Z*g.p.opt.pred*delta.marg)/pmax(fz.pred*delta.pred,lb))
-  component3.opt = dat.bt$gamma.opt.pred[!dat.bt$train]
-  component4.opt = with(dat.bt[!dat.bt$train,], Z*(A - pred.A)*gamma.opt.pred*delta.marg/(2*pmax(fz.pred*delta.pred,lb) ))
+  component1.opt = with(dat[!dat$train,], (Y*I(fitted.owl == A)*Z*A)/ (Z.pred*delta.pred))
+  component2.opt = with(dat[!dat$train,], (Z*g.p.opt.pred)/(Z.pred*delta.pred))
+  component3.opt = dat$gamma.opt.pred[!dat$train]
+  component4.opt = with(dat[!dat$train,], Z*(A - A.pred)*gamma.opt.pred/(2*(Z.pred*delta.pred)))
   
   value.opt.mr = mean(component1.opt - component2.opt + component3.opt - component4.opt) 
   
-  ####### maob
-  component1.maob = with(dat.bt[!dat.bt$train,], (outcome*I(fitted.maob == A)*Z*A*delta.marg)/pmax(fz.pred*delta.pred,lb))
-  component2.maob = with(dat.bt[!dat.bt$train,],  (Z*g.p.maob.pred*delta.marg)/pmax(fz.pred*delta.pred,lb))
-  component3.maob = dat.bt$gamma.maob.pred[!dat.bt$train]
-  component4.maob = with(dat.bt[!dat.bt$train,], Z*(A - pred.A)*gamma.maob.pred*delta.marg/(2*pmax(fz.pred*delta.pred,lb) ))
+  #### trt A
+  component1.A = with(dat[!dat$train,], (Y*I(fitted.A == A)*Z*A)/ (Z.pred*delta.pred))
+  component2.A = with(dat[!dat$train,], (Z*g.p.A.pred)/(Z.pred*delta.pred))
+  component3.A = dat$gamma.A.pred[!dat$train]
+  component4.A = with(dat[!dat$train,], Z*(A - A.pred)*gamma.A.pred/(2*(Z.pred*delta.pred)))
   
-  value.maob.mr = mean(component1.maob - component2.maob + component3.maob - component4.maob)
+  value.A.mr = mean(component1.A - component2.A + component3.A - component4.A) 
+  #### trt B
+  component1.B = with(dat[!dat$train,], (Y*I(fitted.B == A)*Z*A)/ (Z.pred*delta.pred))
+  component2.B = with(dat[!dat$train,], (Z*g.p.B.pred)/(Z.pred*delta.pred))
+  component3.B = dat$gamma.B.pred[!dat$train]
+  component4.B = with(dat[!dat$train,], Z*(A - A.pred)*gamma.B.pred/(2*(Z.pred*delta.pred)))
   
-  ####### dra
-  component1.dra = with(dat.bt[!dat.bt$train,], (outcome*I(fitted.dra == A)*Z*A*delta.marg)/pmax(fz.pred*delta.pred,lb))
-  component2.dra = with(dat.bt[!dat.bt$train,],  (Z*g.p.dra.pred*delta.marg)/pmax(fz.pred*delta.pred,lb))
-  component3.dra = dat.bt$gamma.dra.pred[!dat.bt$train]
-  component4.dra = with(dat.bt[!dat.bt$train,], Z*(A - pred.A)*gamma.dra.pred*delta.marg/(2*pmax(fz.pred*delta.pred,lb) ))
+  value.B.mr = mean(component1.B - component2.B + component3.B - component4.B) 
   
-  value.dra.mr = mean(component1.dra -  component2.dra + component3.dra - component4.dra)
-  
+ 
   #variance of the mr
-  est.var.opt = var((component1.opt - component2.opt + component3.opt - component4.opt))*(1/length(dat.bt$outcome[!dat.bt$train]))
-  est.var.dra = var((component1.dra -  component2.dra + component3.dra - component4.dra))*(1/length(dat.bt$outcome[!dat.bt$train]))
-  est.var.maob = var((component1.maob - component2.maob + component3.maob - component4.maob))*(1/length(dat.bt$outcome[!dat.bt$train]))
+  var.opt.mr = var((component1.opt - component2.opt + component3.opt - component4.opt))/sum( 1 - dat$train )
+  var.B.mr= var((component1.B -  component2.B + component3.B - component4.B))/sum( 1 - dat$train )
+  var.A.mr = var((component1.A - component2.A + component3.A - component4.A))/sum( 1 - dat$train )
   
+  
+  #return the results 
+  value.function =data.frame(est.ipw = c(value.opt, value.A, value.B), 
+                             est.mr = c(value.opt.mr, value.A.mr, value.B.mr))
+  colnames(value.function) = c("IPW estimator", "MR estimator")
+  rownames(value.function) = c("Opt Trt.", "Trt A", "Trt B")
+  
+  var.value.function = c(var.opt.mr, var.A.mr, var.B.mr)
+  names(var.value.function) = c("Var Opt.", "Var Trt A.", "Var Trt B.")
+  
+  
+  return(list(model = mod.owl, 
+              value.funcion = value.function, 
+              variance = var.value.function, 
+              coef.owl = owl.coef) )
 }
 
 #unit test
 
-fit.iv.owl(itr_formula = ~ updrs_1 + updrs_2 + updrs_3 + time_from_diagnosis.2nd + levodopa_dose.2nd + gender + age.2nd + bmi + dys + fluc + nausea + sleep + Time_since_first_Levo,
+res = fit.iv.owl(itr_formula = ~ updrs_1 + updrs_2 + updrs_3 + time_from_diagnosis.2nd + levodopa_dose.2nd + gender + age.2nd + bmi + dys + fluc + nausea + sleep + Time_since_first_Levo,
            iv_formula =  ~ updrs_1 + updrs_2 + updrs_3 + time_from_diagnosis + levodopa_dose + gender + age + bmi +Time_since_first_Levo, 
            trt_formula = ~ Z + updrs_1 + updrs_2 + updrs_3 + time_from_diagnosis.2nd + levodopa_dose.2nd + gender + age.2nd + bmi + Time_since_first_Levo,
+           mean_formula = ~ updrs_1 +  updrs_2 + updrs_3 + time_from_diagnosis.2nd + levodopa_dose.2nd +
+             gender + age.2nd  + bmi  + Time_since_first_Levo, 
            dat = iv.dat2a, trt ="A", iv = "Z", outcome = "outcome_updrs3", seed = 3431, minimize = T, center.outcome = T )
 
-fit.iv.owl(itr_formula = ~ updrs_1 ,
-           iv_formula =  ~ updrs_1 + updrs_2 + updrs_3 + time_from_diagnosis + age + Time_since_first_Levo , 
-           trt_formula = ~ Z ,
-           dat = iv.dat2a, trt ="A", iv = "Z", outcome = "outcome_updrs3", seed = 3431 )
