@@ -16,7 +16,7 @@
 #' # Example usage
 #' sim_dat = dat.gen.owl(23, nsample = 250)
 #'
-#' model.owl = fit.owl(itr_formula = ~ X.1 + X.2 + X.3, prop_formula = ~ X.1 + X.2, mean_formula = ~ A*(X.1 + X.2) - X.1 - X.2, method = "mr", trt = "A", outcome = "outcome", dat = sim_dat,
+#' model.owl = fit.owl(itr_formula = ~ X.1 + X.2 + X.3, prop_formula = ~ X.1 + X.2, mean_formula = ~ A*(X.1 + X.2) - X.1 - X.2, method = "mr", trt = "A", outcome = "Y", dat = sim_dat,
 #'                    center.outcome = F, seed = 98734)
 #'
 #' pred.val = predict(model.owl$model, newdata = sim_dat)
@@ -41,7 +41,7 @@ fit.owl = function(itr_formula, prop_formula, mean_formula = NULL,method, trt, o
     ## Extract variables from formulas
     itr_vars <- all.vars(itr_formula)
     prop_vars <- all.vars(prop_formula)
-   
+    
     
     missing_itr_vars <- setdiff(itr_vars, names(dat))
     missing_prop_vars <- setdiff(prop_vars, names(dat))
@@ -97,7 +97,7 @@ fit.owl = function(itr_formula, prop_formula, mean_formula = NULL,method, trt, o
     ## Propensity score model
     
     #convert to a formula
-    logistic.formula = paste( "as.factor(A)" , deparse(prop_formula), collapse = "")  
+    logistic.formula = paste( "as.factor(A)" , deparse(prop_formula, width.cutoff = 500), collapse = "")  
     
     logistic.A = glm(logistic.formula, data = dat, family = binomial(link = "logit"))
     
@@ -108,8 +108,8 @@ fit.owl = function(itr_formula, prop_formula, mean_formula = NULL,method, trt, o
     
     #convert to a formula
     if(is.null(mean_formula)){
-      lm.formula = paste("Y", deparse(prop_formula), collapse = "" )
-    }else{ lm.formula = paste("Y", deparse(mean_formula), collapse = "" )  }
+      lm.formula = paste("Y", deparse(prop_formula, width.cutoff = 500), collapse = "" )
+    }else{ lm.formula = paste("Y", deparse(mean_formula, width.cutoff = 500), collapse = "" )  }
     
     lm.mod = lm(lm.formula, data = dat)
    
@@ -141,7 +141,7 @@ fit.owl = function(itr_formula, prop_formula, mean_formula = NULL,method, trt, o
     dat$lab = sign(dat$weight)*dat$A
     
     
-    formula_str <- paste("as.factor(lab)", deparse(itr_formula), collapse = "")
+    formula_str <- paste("as.factor(lab)", deparse(itr_formula, width.cutoff = 500), collapse = "")
     formula.owl <- as.formula(formula_str)
     
     ## Model fitting
@@ -161,7 +161,7 @@ fit.owl = function(itr_formula, prop_formula, mean_formula = NULL,method, trt, o
     #return(table(fitted.owl, true.value[!dat$train]))
     
     owl.coef = svm.coef(mod.owl, type = "line")
-    
+    names(owl.coef) = c("Intercept", itr_vars)
     
     ## Evaluating the value function
 
@@ -206,9 +206,13 @@ fit.owl = function(itr_formula, prop_formula, mean_formula = NULL,method, trt, o
     
     return(list(model = mod.owl, 
                 value.funcion = value.function, 
-                variance = var.value.function ) )
+                variance = var.value.function, 
+                coef.owl = owl.coef) )
 }
 
 
+sim_dat = dat.gen.owl(23, nsample = 250)
 
+model.owl = fit.owl(itr_formula = ~ X.1 + X.2 + X.3, prop_formula = ~ X.1 + X.2, mean_formula = ~ A*(X.1 + X.2) - X.1 - X.2, method = "mr", trt = "A", outcome = "Y", dat = sim_dat,
+                    center.outcome = F, seed = 98734)
 
