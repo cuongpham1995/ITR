@@ -1,4 +1,8 @@
 
+res2 = fit.iv.owl.bt.ls1.postcept(seed = 3431, dat = iv.dat2a, covariates = sel.cov, 
+                           kernel.type = "linear", degree.poly = 2, outcome.col = outcome,
+                           minimize = T, complier = F, center.outcome = T, scale.covariates = F, lb = 0, logistic = T)
+
 fit.iv.owl.bt.ls1.postcept = function(seed, dat, covariates, kernel.type, degree.poly,  outcome.col, minimize = T, complier = F, center.outcome = T, scale.covariates = T, lb = 0, logistic){
   tryCatch({ 
     set.seed(seed)
@@ -150,6 +154,7 @@ fit.iv.owl.bt.ls1.postcept = function(seed, dat, covariates, kernel.type, degree
     owl.coef = svm.coef(mod.owl, type = "line")
     names(owl.coef) = c("Intercept", covariates)
     
+    #return(table(fitted.owl))
     
     MAOB.same = apply(dat.bt[dat.bt$A == -1 & dat.bt$A == dat.bt$fitted.owl & dat.bt$train, covariates],2,mean, na.rm =T)
     MAOB.diff = apply(dat.bt[dat.bt$A == -1 & dat.bt$A != dat.bt$fitted.owl & dat.bt$train, covariates],2,mean, na.rm = T)
@@ -178,6 +183,7 @@ fit.iv.owl.bt.ls1.postcept = function(seed, dat, covariates, kernel.type, degree
     temp.dat.opt$Z = -1
     dat.bt$g.p.opt.pred = predict(g.p.opt.mod, newdata = temp.dat.opt  )   
     
+    
     #### estimator of gamma
     
     #dat$gamma.pseudo.opt = (dat$g.p.opt - dat$g.p.opt.pred)*dat$Z/dat$fz.pred 
@@ -189,6 +195,7 @@ fit.iv.owl.bt.ls1.postcept = function(seed, dat, covariates, kernel.type, degree
                          gender + age.2nd  + bmi + Time_since_first_Levo  , data = dat.bt, weights = gamma.weight)
     dat.bt$gamma.opt.pred = predict(gamma.opt.mod, newdata = dat.bt)
     
+   
     #### maob ############################
     ### estimator of gamma prime
     
@@ -204,6 +211,7 @@ fit.iv.owl.bt.ls1.postcept = function(seed, dat, covariates, kernel.type, degree
                           gender + age.2nd  + bmi + Time_since_first_Levo , data = dat.bt, weights = gamma.weight)
     dat.bt$gamma.maob.pred = predict(gamma.maob.mod, newdata = dat.bt)
     
+    
     ########### dra #######################################
     ## gamma prime 
     g.p.dra.mod = lm(g.p.DRA ~ Z+  updrs_1 +  updrs_2 + updrs_3 + time_from_diagnosis.2nd + levodopa_dose.2nd +
@@ -217,14 +225,14 @@ fit.iv.owl.bt.ls1.postcept = function(seed, dat, covariates, kernel.type, degree
                          gender + age.2nd  + bmi + Time_since_first_Levo , data = dat.bt, weights = gamma.weight)
     dat.bt$gamma.dra.pred = predict(gamma.dra.mod, newdata = dat.bt)
     
-    
+ 
     #calculate the value function
     value.opt = with(dat.bt[!dat.bt$train,], mean((outcome*I(fitted.owl == A)*Z*A*delta.marg)/( pmax(fz.pred*delta.pred,lb) )))
     value.maob = with(dat.bt[!dat.bt$train,], mean((outcome*I(fitted.maob == A)*Z*A*delta.marg)/ pmax(fz.pred*delta.pred,lb) ))
     value.dra = with(dat.bt[!dat.bt$train,], mean((outcome*I(fitted.dra == A)*Z*A*delta.marg)/pmax(fz.pred*delta.pred,lb)))
     value.behavior = mean(dat.bt$outcome[!dat.bt$train]) 
     
-    
+
     ## calculate the mr value function
     ##### opt
     
@@ -251,6 +259,7 @@ fit.iv.owl.bt.ls1.postcept = function(seed, dat, covariates, kernel.type, degree
     
     value.dra.mr = mean(component1.dra -  component2.dra + component3.dra - component4.dra)
     
+    return(c(value.opt.mr, value.maob.mr, value.dra.mr))
     #variance of the mr
     est.var.opt = var((component1.opt - component2.opt + component3.opt - component4.opt))*(1/length(dat.bt$outcome[!dat.bt$train]))
     est.var.dra = var((component1.dra -  component2.dra + component3.dra - component4.dra))*(1/length(dat.bt$outcome[!dat.bt$train]))

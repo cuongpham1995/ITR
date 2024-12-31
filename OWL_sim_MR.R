@@ -29,11 +29,11 @@ dat.gen.owl =function(seed, nsample){
   A = as.matrix(2*rbinom(nsample, size = 1, prob = 0.5) - 1)
   
   #Y = rmvnorm(n =1, mean = 1 + 2*X[,1] + X[,2] + 0.5*X[,3] + 0.442*(1 - X[,1] - X[,2])*A[,1], sigma = sigma.mat) %>% t()
-  Y = rmvnorm(n =1, mean = 1 + (0.5 - 0.5*X[,1] - X[,2])*A[,1], sigma = sigma.mat) %>% t()
+  Y = rmvnorm(n =1, mean = 1 +  (0.5 - 0.5*X[,1] - X[,2])*A[,1], sigma = sigma.mat) %>% t()
   
   #potential values
   Y1 =as.matrix( 1 +  (0.5 - 0.5*X[,1] - X[,2])*1)
-  Yn1 = as.matrix( 1+  (0.5 - 0.5*X[,1] - X[,2])*(-1)) 
+  Yn1 = as.matrix( 1+    (0.5 - 0.5*X[,1] - X[,2])*(-1)) 
   
   #table(Y1 > Yn1)
   
