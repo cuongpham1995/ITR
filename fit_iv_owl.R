@@ -81,8 +81,9 @@ fit.iv.owl = function(itr_formula, iv_formula, trt_formula, mean_formula = NULL,
   ## Trt model
   
   #convert to a formula
- 
-  trt.logistic.formula = paste( "as.factor(A)" , deparse(trt_formula, width.cutoff = 500), collapse = "") 
+  
+  trt_formula2 <- update(trt_formula, paste("~ . +", "Z")) #adding the instrument variable
+  trt.logistic.formula = paste( "as.factor(A)" , deparse(trt_formula2, width.cutoff = 500), collapse = "") 
   
   trt.logistic = glm(trt.logistic.formula, data = dat, family = binomial(link = "logit"))
   
@@ -99,9 +100,21 @@ fit.iv.owl = function(itr_formula, iv_formula, trt_formula, mean_formula = NULL,
   
   #calculating the weight
   dat$delta.pred = dat$A.Z1 - dat$A.Zn1 #calculate the delta term
-  dat$weight = if(method == "iv owl"){with(dat, Y*A*Z/(Z.pred*delta.pred))
-  }else if(method == "owl"){with(dat, Y/A.pred)
-                  }else {stop("Invalid method")}
+  
+  if(method == "iv owl"){ 
+    dat$weight = with(dat, Y*A*Z/(Z.pred*delta.pred))
+  }else if(method == "owl"){
+    
+    #if the owl method is used, we do not use the instrument variable 
+    trt.logistic.formula = paste( "as.factor(A)" , deparse(trt_formula, width.cutoff = 500), collapse = "") 
+  
+    trt.logistic = glm(trt.logistic.formula, data = dat, family = binomial(link = "logit"))
+    
+    pred.A = predict(trt.logistic, type = "response", newdata = dat)
+    dat$A.pred.2 = ifelse(dat$A == 1, pred.A, 1 - pred.A)
+    
+    dat$weight = with(dat, Y/A.pred.2)
+  }else {stop("Invalid method. Enter: iv owl or owl")}
   
   dat$fitted.owl = NA
   
@@ -143,7 +156,7 @@ fit.iv.owl = function(itr_formula, iv_formula, trt_formula, mean_formula = NULL,
   
   ############ opt ################
   ### estimator of gamma prime
-  mean_formula2 <- mean_formula2 <- update(mean_formula, paste("~ . +", "Z"))
+  mean_formula2 <- update(mean_formula, paste("~ . +", "Z"))
   gamma.prime.opt.formula = paste("g.p.opt", deparse(mean_formula2, width.cutoff = 500), collapse = "")
   gamma.opt.formula = paste("gamma.pseudo.opt", deparse(mean_formula, width.cutoff = 500), collapse = "")
   
@@ -244,17 +257,18 @@ fit.iv.owl = function(itr_formula, iv_formula, trt_formula, mean_formula = NULL,
   
   
   return(list(model = mod.owl, 
-              value.funcion = value.function, 
+              value.funcion.IPW =c(value.opt, value.A, value.B),
+              value.funcion.MR = c(value.opt.mr, value.A.mr, value.B.mr),
               variance = var.value.function, 
               coef.owl = owl.coef) )
 }
 
 #unit test
 
-res = fit.iv.owl(itr_formula = ~ updrs_1 + updrs_2 + updrs_3 + time_from_diagnosis.2nd + levodopa_dose.2nd + gender + age.2nd + bmi + dys + fluc + nausea + sleep + Time_since_first_Levo,
-           iv_formula =  ~ updrs_1 + updrs_2 + updrs_3 + time_from_diagnosis + levodopa_dose + gender + age + bmi +Time_since_first_Levo, 
-           trt_formula = ~ Z + updrs_1 + updrs_2 + updrs_3 + time_from_diagnosis.2nd + levodopa_dose.2nd + gender + age.2nd + bmi + Time_since_first_Levo,
-           mean_formula = ~ updrs_1 +  updrs_2 + updrs_3 + time_from_diagnosis.2nd + levodopa_dose.2nd +
-             gender + age.2nd  + bmi  + Time_since_first_Levo, 
-           dat = iv.dat2a, trt ="A", iv = "Z", outcome = "outcome_updrs3", seed = 3431, minimize = T, center.outcome = T )
-
+#res = fit.iv.owl(itr_formula = ~ updrs_1 + updrs_2 + updrs_3 + time_from_diagnosis.2nd + levodopa_dose.2nd + gender + age.2nd + bmi + dys + fluc + nausea + sleep + Time_since_first_Levo,
+#           iv_formula =  ~ updrs_1 + updrs_2 + updrs_3 + time_from_diagnosis + levodopa_dose + gender + age + bmi +Time_since_first_Levo, 
+#           trt_formula = ~ updrs_1 + updrs_2 + updrs_3 + time_from_diagnosis.2nd + levodopa_dose.2nd + gender + age.2nd + bmi + Time_since_first_Levo,
+#           mean_formula = ~ updrs_1 +  updrs_2 + updrs_3 + time_from_diagnosis.2nd + levodopa_dose.2nd +
+#             gender + age.2nd  + bmi  + Time_since_first_Levo, method = "iv owl",
+#           dat = iv.dat2a, trt ="A", iv = "Z", outcome = "outcome_updrs3", seed = 3431, minimize = T, center.outcome = T )
+#res$value.funcion
