@@ -25,7 +25,8 @@
 #' itr_formula <- ~ X1 + X2
 #' prop_formula <- ~ X1 + X2
 #' fit.owl(itr_formula, prop_formula, trt = "A", dat = dat)
-
+#' @export
+#' 
 fit.owl = function(itr_formula, prop_formula, mean_formula = NULL,method, trt, outcome, dat, 
                    na.rm = T, minimize = F, center.outcome = F, 
                    kernel = "linear", cross = 10, scale = T, seed, ...){
@@ -210,9 +211,4 @@ fit.owl = function(itr_formula, prop_formula, mean_formula = NULL,method, trt, o
                 coef.owl = owl.coef) )
 }
 
-
-sim_dat = dat.gen.owl(23, nsample = 250)
-
-model.owl = fit.owl(itr_formula = ~ X.1 + X.2 + X.3, prop_formula = ~ X.1 + X.2, mean_formula = ~ A*(X.1 + X.2) - X.1 - X.2, method = "mr", trt = "A", outcome = "Y", dat = sim_dat,
-                    center.outcome = F, seed = 98734)
 
