@@ -88,5 +88,3 @@ dat.gen.owl =function(seed, nsample){
 }
 
 
-
-
