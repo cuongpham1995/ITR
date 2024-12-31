@@ -1,3 +1,47 @@
+#' Fit an Instrumental Variable Outcome Weighted Learning Model
+#'
+#' This function fits an IV Outcome-Weighted Learning (IV-OWL) or OWL model for
+#' personalized treatment regime learning. It estimates treatment effects using
+#' instrumental variables and computes both IPW and MR estimators of value functions.
+#'
+#' @param itr_formula A formula specifying the variables for the individualized treatment regime model.
+#' @param iv_formula A formula specifying the variables for the instrumental variable model.
+#' @param trt_formula A formula specifying the variables for the treatment model.
+#' @param mean_formula A formula specifying the variables for mean modeling (optional).
+#' @param method A character string specifying the method, either `"iv owl"` or `"owl"`.
+#' @param trt A string specifying the treatment variable in the dataset.
+#' @param iv A string specifying the instrumental variable in the dataset.
+#' @param outcome A string specifying the outcome variable in the dataset.
+#' @param dat A data frame containing the variables specified in the formulas.
+#' @param na.rm A logical value indicating whether to remove rows with missing data (default is `TRUE`).
+#' @param minimize A logical value indicating whether to minimize the outcome (default is `FALSE`).
+#' @param center.outcome A logical value indicating whether to center the outcome (default is `FALSE`).
+#' @param kernel A string specifying the kernel type for SVM (default is `"linear"`).
+#' @param cross An integer specifying the number of folds for cross-validation (default is `10`).
+#' @param scale A logical value indicating whether to scale the data for SVM (default is `TRUE`).
+#' @param seed An integer to set the random seed for reproducibility.
+#' @param ... Additional arguments passed to underlying functions.
+#'
+#' @return A list containing:
+#'   \item{model}{The fitted OWL model object.}
+#'   \item{value.function.IPW}{Estimated value functions using IPW.}
+#'   \item{value.function.MR}{Estimated value functions using MR.}
+#'   \item{variance}{Variance of MR estimators.}
+#'   \item{coef.owl}{Coefficients of the OWL model.}
+#'
+#' @importFrom WeightSVM wsvm
+#' @importFrom stats glm predict lm
+#'
+#' @examples
+#' # Example usage with example data
+#' # res <- fit.iv.owl(itr_formula = ~ x1 + x2, iv_formula = ~ z1 + z2, 
+#' #                   trt_formula = ~ x1 + x2 + z1, dat = example_data, 
+#' #                   trt = "A", iv = "Z", outcome = "Y", 
+#' #                   method = "iv owl", seed = 123)
+#' # res$value.function.IPW
+#'
+#' @export
+
 fit.iv.owl = function(itr_formula, iv_formula, trt_formula, mean_formula = NULL, method, trt, iv, outcome, dat, 
                       na.rm = T, minimize = F, center.outcome = F, 
                       kernel = "linear", cross = 10, scale = T, seed, ...){ 
